@@ -9,25 +9,36 @@ pub struct FormData {
     name: String,
 }
 
-pub async fn subscribe(form: web::Form<FormData>, connection: web::Data<PgPool>) -> HttpResponse {
+pub async fn subscribe(form: web::Form<FormData>, pool: web::Data<PgPool>) -> HttpResponse {
+    let request_id = Uuid::new_v4();
+    let request_span = tracing::info_span!("Adding a new subscriber.",%request_id,subscriber_email = %form.email,subscriber_name= %form.name);
+    let _request_span_guard = request_span.enter();
     match sqlx::query!(
         r#"
-        INSERT INTO subscriptions (id, email, name, subscribed_at)
-        VALUES ($1, $2, $3, $4)
-        "#,
+    INSERT INTO subscriptions (id, email, name, subscribed_at)
+    VALUES ($1, $2, $3, $4)
+            "#,
         Uuid::new_v4(),
         form.email,
         form.name,
         Utc::now()
     )
-    // We use `get_ref` to get an immutable reference to the `PgConnection`
-    // wrapped by `web::Data`.
-    .execute(connection.get_ref())
+    .execute(pool.as_ref())
     .await
     {
-        Ok(_) => HttpResponse::Ok().finish(),
+        Ok(_) => {
+            tracing::info!(
+                "request_id {} - New subscriber details have been saved",
+                request_id
+            );
+            HttpResponse::Ok().finish()
+        }
         Err(e) => {
-            println!("Failed to execute the query: {}", e);
+            tracing::error!(
+                "request_id {} - Failed to execute query: {:?}",
+                request_id,
+                e
+            );
             HttpResponse::InternalServerError().finish()
         }
     }
